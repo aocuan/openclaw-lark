@@ -458,11 +458,11 @@ export function registerFeishuDriveFileTool(api: OpenClawPluginApi) {
               assertLarkOk(res);
 
               const data = res.data as DriveTaskData | undefined;
-              log.info(`move: task_id=${data?.task_id}`);
+              log.info(`move: success${data?.task_id ? `, task_id=${data.task_id}` : ''}`);
 
               return json({
                 success: true,
-                task_id: data?.task_id,
+                ...(data?.task_id ? { task_id: data.task_id } : {}),
                 file_token: p.file_token,
                 target_folder_token: p.folder_token,
               });
@@ -491,11 +491,11 @@ export function registerFeishuDriveFileTool(api: OpenClawPluginApi) {
               assertLarkOk(res);
 
               const data = res.data as DriveTaskData | undefined;
-              log.info(`delete: task_id=${data?.task_id}`);
+              log.info(`delete: success${data?.task_id ? `, task_id=${data.task_id}` : ''}`);
 
               return json({
                 success: true,
-                task_id: data?.task_id,
+                ...(data?.task_id ? { task_id: data.task_id } : {}),
                 file_token: p.file_token,
               });
             }
