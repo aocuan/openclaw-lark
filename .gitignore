@@ -24,3 +24,5 @@ src/tools/docs/
 /**/.DS_Store
 
 .eslintcache
+.claude/
+.CLAUDE.md
