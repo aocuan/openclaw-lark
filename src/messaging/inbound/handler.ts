@@ -40,6 +40,7 @@ import { type GateResult, checkMessageGate, readFeishuAllowFromStore } from './g
 import { injectInboundHandler } from './handler-registry';
 import { dispatchToAgent } from './dispatch';
 import { resolveFeishuGroupConfig, splitLegacyGroupAllowFrom } from './policy';
+import { maybeCreateDynamicAgent, type DynamicAgentCreationConfig } from '../../core/dynamic-agent';
 
 const logger = larkLogger('inbound/handler');
 
@@ -201,6 +202,44 @@ export async function handleFeishuMessage(params: {
     resolveCommandAuthorizedFromAuthorizers: core.channel.commands.resolveCommandAuthorizedFromAuthorizers,
   });
 
+  // 7b. Dynamic agent creation for DM users
+  //
+  // When enabled, creates a unique agent instance with its own workspace for
+  // each new DM user.  Pre-check the route: if it falls through to "default"
+  // and the message is a direct chat, attempt dynamic creation and rebuild
+  // the accountScopedCfg so that dispatch resolves the new binding.
+  let effectiveAccountScopedCfg = accountScopedCfg;
+  if (!isGroup) {
+    // dynamicAgentCreation 是 top-level 配置（非 per-account），从原始 cfg 读取
+    const topLevelFeishuCfg = cfg.channels?.feishu as Record<string, unknown> | undefined;
+    const dynamicCfg = topLevelFeishuCfg?.dynamicAgentCreation as DynamicAgentCreationConfig | undefined;
+    if (dynamicCfg?.enabled) {
+      const preRoute = core.channel.routing.resolveAgentRoute({
+        cfg: accountScopedCfg,
+        channel: 'feishu',
+        accountId: account.accountId,
+        peer: { kind: 'direct', id: ctx.senderId },
+      });
+      if (preRoute.matchedBy === 'default') {
+        try {
+          const result = await maybeCreateDynamicAgent({
+            cfg: accountScopedCfg,
+            runtime: core,
+            senderOpenId: ctx.senderId,
+            dynamicCfg,
+            log: (msg) => log(msg),
+          });
+          if (result.created) {
+            effectiveAccountScopedCfg = result.updatedCfg;
+            log(`feishu[${account.accountId}]: dynamic agent created for ${ctx.senderId}`);
+          }
+        } catch (err) {
+          error(`feishu[${account.accountId}]: dynamic agent creation failed: ${String(err)}`);
+        }
+      }
+    }
+  }
+
   // 8. Dispatch to agent
   // groupConfig and defaultGroupConfig are already resolved above.
 
@@ -211,7 +250,7 @@ export async function handleFeishuMessage(params: {
       mediaPayload: mediaResult.payload,
       quotedContent,
       account,
-      accountScopedCfg,
+      accountScopedCfg: effectiveAccountScopedCfg,
       runtime,
       chatHistories,
       historyLimit,

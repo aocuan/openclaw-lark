@@ -9,7 +9,12 @@
  * dependencies needed to process the event.
  */
 
-import type { FeishuBotAddedEvent, FeishuMessageEvent, FeishuReactionCreatedEvent } from '../messaging/types';
+import type {
+  FeishuBotAddedEvent,
+  FeishuMessageEvent,
+  FeishuP2pChatEnteredEvent,
+  FeishuReactionCreatedEvent,
+} from '../messaging/types';
 import { handleFeishuMessage } from '../messaging/inbound/handler';
 import { handleFeishuReaction, resolveReactionContext } from '../messaging/inbound/reaction-handler';
 import { isMessageExpired } from '../messaging/inbound/dedup';
@@ -19,6 +24,8 @@ import { handleCardAction } from '../tools/auto-auth';
 import { handleAskUserAction } from '../tools/ask-user-question';
 import { buildQueueKey, enqueueFeishuChatTask, getActiveDispatcher, hasActiveTask } from './chat-queue';
 import { extractRawTextFromEvent, isLikelyAbortText } from './abort-detect';
+import { sendMessageFeishu } from '../messaging/outbound/send';
+import { getLarkAccount } from '../core/accounts';
 import type { MonitorContext } from './types';
 
 const elog = larkLogger('channel/event-handlers');
@@ -232,8 +239,64 @@ export async function handleBotMembershipEvent(
   try {
     const event = data as FeishuBotAddedEvent;
     log(`feishu[${accountId}]: bot ${action} ${action === 'removed' ? 'from' : 'to'} chat ${event.chat_id}`);
+
+    // Send group welcome message when bot is added to a group
+    if (action === 'added' && event.chat_id) {
+      const account = getLarkAccount(ctx.cfg, accountId);
+      const welcomeText = account.config?.groupWelcomeMessage;
+      if (welcomeText) {
+        try {
+          await sendMessageFeishu({
+            cfg: ctx.cfg,
+            to: `chat:${event.chat_id}`,
+            text: welcomeText,
+            accountId,
+          });
+          log(`feishu[${accountId}]: sent group welcome message to ${event.chat_id}`);
+        } catch (sendErr) {
+          error(`feishu[${accountId}]: failed to send group welcome message: ${String(sendErr)}`);
+        }
+      }
+    }
   } catch (err) {
     error(`feishu[${accountId}]: error handling bot ${action} event: ${String(err)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bot p2p chat entered handler (user first opens DM with bot)
+// ---------------------------------------------------------------------------
+
+export async function handleBotP2pChatEntered(
+  ctx: MonitorContext,
+  data: unknown,
+): Promise<void> {
+  if (!isEventOwnershipValid(ctx, data)) return;
+  const { accountId, log, error } = ctx;
+  try {
+    const event = data as FeishuP2pChatEnteredEvent;
+    const userOpenId = event.operator_id?.open_id ?? event.user_id?.open_id;
+    if (!userOpenId) return;
+
+    log(`feishu[${accountId}]: user ${userOpenId} entered p2p chat`);
+
+    const account = getLarkAccount(ctx.cfg, accountId);
+    const welcomeText = account.config?.welcomeMessage;
+    if (!welcomeText) return;
+
+    try {
+      await sendMessageFeishu({
+        cfg: ctx.cfg,
+        to: `user:${userOpenId}`,
+        text: welcomeText,
+        accountId,
+      });
+      log(`feishu[${accountId}]: sent welcome message to ${userOpenId}`);
+    } catch (sendErr) {
+      error(`feishu[${accountId}]: failed to send welcome message: ${String(sendErr)}`);
+    }
+  } catch (err) {
+    error(`feishu[${accountId}]: error handling p2p chat entered: ${String(err)}`);
   }
 }
 
