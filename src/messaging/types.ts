@@ -78,6 +78,26 @@ export interface FeishuBotAddedEvent {
   };
 }
 
+/**
+ * Event payload for `im.chat.access_event.bot_p2p_chat_entered_v1`.
+ *
+ * Fired when a user first opens a direct chat with the bot.
+ */
+export interface FeishuP2pChatEnteredEvent {
+  chat_id?: string;
+  operator_id?: {
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  };
+  /** @deprecated Alias present in some SDK versions. */
+  user_id?: {
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Resource descriptor
 // ---------------------------------------------------------------------------
@@ -219,3 +239,18 @@ export interface FeishuSendResult {
    */
   warning?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Dynamic agent creation
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for per-user dynamic agent creation.
+ * Matches the upstream `extensions/feishu/src/types.ts` definition.
+ */
+export type DynamicAgentCreationConfig = {
+  enabled?: boolean;
+  workspaceTemplate?: string;
+  agentDirTemplate?: string;
+  maxAgents?: number;
+};

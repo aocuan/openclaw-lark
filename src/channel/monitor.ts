@@ -19,6 +19,7 @@ import { drainShutdownHooks } from '../core/shutdown-hooks';
 import type { MonitorContext, MonitorFeishuOpts } from './types';
 import {
   handleBotMembershipEvent,
+  handleBotP2pChatEntered,
   handleCardActionEvent,
   handleMessageEvent,
   handleReactionEvent,
@@ -101,7 +102,7 @@ async function monitorSingleAccount(params: {
       // plugin's current behavior. Register no-op handlers to avoid SDK
       // warnings about missing handlers.
       'im.message.reaction.deleted_v1': async () => {},
-      'im.chat.access_event.bot_p2p_chat_entered_v1': async () => {},
+      'im.chat.access_event.bot_p2p_chat_entered_v1': (data) => handleBotP2pChatEntered(ctx, data),
       'im.chat.member.bot.added_v1': (data) => handleBotMembershipEvent(ctx, data, 'added'),
       'im.chat.member.bot.deleted_v1': (data) => handleBotMembershipEvent(ctx, data, 'removed'),
       // 飞书 SDK EventDispatcher.register 不支持带返回值的处理器，此处 as any 是 SDK 类型限制的变通
