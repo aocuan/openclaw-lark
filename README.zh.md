@@ -116,7 +116,10 @@
 ### 从 GitHub 安装
 
 ```bash
-openclaw plugins install https://github.com/aocuan/openclaw-lark
+git clone --depth=1 https://github.com/aocuan/openclaw-lark /tmp/openclaw-lark
+openclaw plugins install /tmp/openclaw-lark
+rm -rf /tmp/openclaw-lark
+openclaw gateway restart
 ```
 
 无需构建——OpenClaw 通过 jiti 直接加载 `index.ts`。
@@ -124,21 +127,15 @@ openclaw plugins install https://github.com/aocuan/openclaw-lark
 ### 从本地路径安装（开发模式）
 
 ```bash
-# 克隆仓库
 git clone https://github.com/aocuan/openclaw-lark.git
 cd openclaw-lark
 npm install
-
-# Link 安装（修改代码后 npm run build 即可生效）
 openclaw plugins install --link .
 npm run build
-```
-
-### 安装后重启 gateway
-
-```bash
 openclaw gateway restart
 ```
+
+Link 模式下，修改代码后 `npm run build` 即可生效，无需重新安装。
 
 ## 使用说明
 [OpenClaw Lark/飞书官方插件使用指南](https://bytedance.larkoffice.com/docx/MFK7dDFLFoVlOGxWCv5cTXKmnMh)
