@@ -116,12 +116,34 @@ This software is licensed under the MIT License. When running, it calls Lark/Fei
 Before you start, make sure you have the following:
 
 - **Node.js**: `v22` or higher.
-- **OpenClaw**: OpenClaw is installed and works properly. For details, visit the [OpenClaw official website](https://openclaw.ai).
+- **OpenClaw**: version **2026.3.22** or higher. Check with `openclaw -v`.
 
-> **Note**: OpenClaw version must be **2026.2.26** or higher. Check with `openclaw -v`. If below this version, you may encounter issues. Upgrade with:
-> ```bash
-> npm install -g openclaw
-> ```
+### Install from GitHub
+
+```bash
+openclaw plugins install https://github.com/aocuan/openclaw-lark
+```
+
+No build step required — OpenClaw loads `index.ts` directly via jiti.
+
+### Install from local path (for development)
+
+```bash
+# Clone the repo
+git clone https://github.com/aocuan/openclaw-lark.git
+cd openclaw-lark
+npm install
+
+# Link install (changes take effect after npm run build)
+openclaw plugins install --link .
+npm run build
+```
+
+### Restart gateway after installation
+
+```bash
+openclaw gateway restart
+```
 
 ## Usage Guide
 

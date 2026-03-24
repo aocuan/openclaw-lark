@@ -110,16 +110,38 @@
 
 在开始之前，请确保你已准备好以下各项：
 
-- **Node.js**: `v22` 或更高版本。
-- **OpenClaw**: OpenClaw 已成功安装并可运行。详情请访问 [OpenClaw 官方网站](https://openclaw.ai)。
+- **Node.js**: `v22` 或更高版本
+- **OpenClaw**: **2026.3.22** 及以上版本，通过 `openclaw -v` 查看
 
-> **注意**：OpenClaw 版本需在 **2026.2.26** 及以上，可通过 `openclaw -v` 命令查看。如果低于该版本可能出现异常，执行以下命令升级：
-> ```bash
-> npm install -g openclaw
-> ```
+### 从 GitHub 安装
+
+```bash
+openclaw plugins install https://github.com/aocuan/openclaw-lark
+```
+
+无需构建——OpenClaw 通过 jiti 直接加载 `index.ts`。
+
+### 从本地路径安装（开发模式）
+
+```bash
+# 克隆仓库
+git clone https://github.com/aocuan/openclaw-lark.git
+cd openclaw-lark
+npm install
+
+# Link 安装（修改代码后 npm run build 即可生效）
+openclaw plugins install --link .
+npm run build
+```
+
+### 安装后重启 gateway
+
+```bash
+openclaw gateway restart
+```
 
 ## 使用说明
-[OpenClaw  Lark/飞书官方插件使用指南](https://bytedance.larkoffice.com/docx/MFK7dDFLFoVlOGxWCv5cTXKmnMh)
+[OpenClaw Lark/飞书官方插件使用指南](https://bytedance.larkoffice.com/docx/MFK7dDFLFoVlOGxWCv5cTXKmnMh)
 
 ## 贡献
 
