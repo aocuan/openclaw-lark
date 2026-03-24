@@ -9,6 +9,9 @@
  * dependencies needed to process the event.
  */
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import type {
   FeishuBotAddedEvent,
   FeishuMessageEvent,
@@ -29,6 +32,59 @@ import { getLarkAccount } from '../core/accounts';
 import type { MonitorContext } from './types';
 
 const elog = larkLogger('channel/event-handlers');
+
+// ---------------------------------------------------------------------------
+// Welcome message dedup — persistent across gateway restarts.
+// Follows the same pattern as upstream feishu dedup (JSON file in state dir).
+// ---------------------------------------------------------------------------
+
+const WELCOMED_FILE = path.join(
+  process.env.OPENCLAW_STATE_DIR?.trim() || path.join(os.homedir(), '.openclaw'),
+  'feishu',
+  'welcomed-users.json',
+);
+
+/** Max entries to keep in the welcomed-users file. */
+const WELCOMED_MAX_ENTRIES = 10_000;
+
+/** In-memory cache, warm from disk on first check. */
+let welcomedUsers: Set<string> | null = null;
+
+async function loadWelcomedUsers(): Promise<Set<string>> {
+  if (welcomedUsers) return welcomedUsers;
+  try {
+    const raw = await fs.readFile(WELCOMED_FILE, 'utf8');
+    const arr = JSON.parse(raw);
+    welcomedUsers = new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    welcomedUsers = new Set();
+  }
+  return welcomedUsers;
+}
+
+/**
+ * Mark a user as welcomed. Uses optimistic in-memory add before
+ * persisting to disk, preventing concurrent sends for the same user.
+ */
+async function markWelcomed(key: string): Promise<void> {
+  const set = await loadWelcomedUsers();
+  set.add(key);
+
+  // Trim oldest entries if over limit
+  if (set.size > WELCOMED_MAX_ENTRIES) {
+    const arr = [...set];
+    const trimmed = arr.slice(arr.length - WELCOMED_MAX_ENTRIES);
+    set.clear();
+    for (const k of trimmed) set.add(k);
+  }
+
+  try {
+    await fs.mkdir(path.dirname(WELCOMED_FILE), { recursive: true });
+    await fs.writeFile(WELCOMED_FILE, JSON.stringify([...set]), 'utf8');
+  } catch (err) {
+    elog.warn(`failed to persist welcomed-users: ${err}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Event ownership validation
@@ -280,10 +336,21 @@ export async function handleBotP2pChatEntered(
 
     log(`feishu[${accountId}]: user ${userOpenId} entered p2p chat`);
 
+    // Only send welcome message once per user (persisted across restarts).
+    // Optimistic mark: add to memory before sending to prevent concurrent duplicates.
+    const welcomeKey = `${accountId}:${userOpenId}`;
+    const welcomed = await loadWelcomedUsers();
+    if (welcomed.has(welcomeKey)) {
+      log(`feishu[${accountId}]: welcome already sent to ${userOpenId}, skipping`);
+      return;
+    }
+
     const account = getLarkAccount(ctx.cfg, accountId);
     const welcomeText = account.config?.welcomeMessage;
     if (!welcomeText) return;
 
+    // Mark in memory first (prevents concurrent sends), persist after success.
+    welcomed.add(welcomeKey);
     try {
       await sendMessageFeishu({
         cfg: ctx.cfg,
@@ -291,8 +358,10 @@ export async function handleBotP2pChatEntered(
         text: welcomeText,
         accountId,
       });
+      await markWelcomed(welcomeKey);
       log(`feishu[${accountId}]: sent welcome message to ${userOpenId}`);
     } catch (sendErr) {
+      welcomed.delete(welcomeKey); // rollback optimistic mark on failure
       error(`feishu[${accountId}]: failed to send welcome message: ${String(sendErr)}`);
     }
   } catch (err) {
