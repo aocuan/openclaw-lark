@@ -121,6 +121,35 @@ export function registerMyTool(api: OpenClawPluginApi): boolean {
 - 使用 `assertLarkOk(res)` 验证响应
 - 权限不足时通过 `handleInvokeErrorWithAutoAuth()` 自动触发 OAuth
 
+## Fork 信息
+
+本仓库 fork 自 [larksuite/openclaw-lark](https://github.com/larksuite/openclaw-lark)，定期从上游 rebase 合并。
+
+- **origin**: `https://github.com/aocuan/openclaw-lark` （我们的 fork）
+- **upstream**: `https://github.com/larksuite/openclaw-lark` （官方上游）
+
+### 我们在上游基础上的改动
+
+#### 1. 多用户 OAuth 支持（`uat.ownerOnly` 配置开关）
+- **文件**: `config-schema.ts`, `owner-policy.ts`, `tool-client.ts`, `oauth.ts`, `auth.ts`, `onboarding-auth.ts`, `auto-auth.ts`
+- **改动**: 新增 `uat.ownerOnly`（默认 true）配置项。设为 false 时任何用户都可以各自 OAuth 授权，token 按 `appId:userOpenId` 独立存储。
+- **关键函数**: `isOwnerOnlyEnabled()`, `assertOwnerAccessIfRequired()`（在 `owner-policy.ts`）
+
+#### 2. 动态 Agent 写入 agent-context.json
+- **文件**: `dynamic-agent.ts`
+- **改动**: 创建 workspace 时写入 `.openclaw/agent-context.json`（包含 channel、peerKind、peerId、agentId），供 bootstrap hook 识别 agent 类型。
+- **配套 hook**: `~/.openclaw/hooks/xiaoan-workspace-seed/`（非仓库内，在部署机器上）
+
+#### 3. 欢迎消息持久化去重
+- **文件**: `event-handlers.ts`
+- **改动**: `bot_p2p_chat_entered` 事件的欢迎消息改为每用户只发一次，持久化到 `~/.openclaw/feishu/welcomed-users.json`。支持乐观标记防并发、失败回滚、10000 条上限裁剪。
+
+### 合并上游时的注意事项
+
+- 冲突通常发生在 `reply-dispatcher.ts` 和 `streaming-card-controller.ts` 的 import 区域（双方都动过 plugin-sdk 的 import 路径）
+- `package.json` 的 `openclaw.extensions` 我们保持 `["./index.ts"]`（link 开发模式），上游可能改成 `["./index.js"]`（npm 发布用）
+- 合并方式：`git fetch upstream && git rebase upstream/main`
+
 ## Commit 风格
 
 遵循 Conventional Commits（但不严格）：
