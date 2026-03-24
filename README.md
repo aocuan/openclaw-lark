@@ -121,7 +121,10 @@ Before you start, make sure you have the following:
 ### Install from GitHub
 
 ```bash
-openclaw plugins install https://github.com/aocuan/openclaw-lark
+git clone --depth=1 https://github.com/aocuan/openclaw-lark /tmp/openclaw-lark
+openclaw plugins install /tmp/openclaw-lark
+rm -rf /tmp/openclaw-lark
+openclaw gateway restart
 ```
 
 No build step required — OpenClaw loads `index.ts` directly via jiti.
@@ -129,21 +132,15 @@ No build step required — OpenClaw loads `index.ts` directly via jiti.
 ### Install from local path (for development)
 
 ```bash
-# Clone the repo
 git clone https://github.com/aocuan/openclaw-lark.git
 cd openclaw-lark
 npm install
-
-# Link install (changes take effect after npm run build)
 openclaw plugins install --link .
 npm run build
-```
-
-### Restart gateway after installation
-
-```bash
 openclaw gateway restart
 ```
+
+In link mode, code changes take effect after `npm run build` without reinstalling.
 
 ## Usage Guide
 
