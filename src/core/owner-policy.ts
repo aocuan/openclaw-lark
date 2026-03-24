@@ -9,7 +9,7 @@
  */
 
 import type * as Lark from '@larksuiteoapi/node-sdk';
-import type { ConfiguredLarkAccount } from './types';
+import type { ConfiguredLarkAccount, FeishuConfig } from './types';
 import { getAppOwnerFallback } from './app-owner-fallback';
 
 // ---------------------------------------------------------------------------
@@ -61,4 +61,35 @@ export async function assertOwnerAccessStrict(
   if (ownerOpenId !== userOpenId) {
     throw new OwnerAccessDeniedError(userOpenId, ownerOpenId);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Config-aware helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * 读取飞书配置中 `uat.ownerOnly` 的值。
+ *
+ * - `true`（默认）：只有应用 Owner 可以使用 user-scope 工具和发起 OAuth。
+ * - `false`：任何用户都可以各自 OAuth 授权。
+ */
+export function isOwnerOnlyEnabled(feishuCfg: FeishuConfig | undefined): boolean {
+  return feishuCfg?.uat?.ownerOnly !== false;
+}
+
+/**
+ * 根据配置决定是否执行 owner 校验。
+ *
+ * 当 `uat.ownerOnly` 为 `false` 时跳过校验，允许任何用户使用 user-scope 工具。
+ * 默认（`ownerOnly` 未设置或为 `true`）保持原有 fail-close 行为。
+ */
+export async function assertOwnerAccessIfRequired(
+  account: ConfiguredLarkAccount,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sdk: any,
+  userOpenId: string,
+  feishuCfg: FeishuConfig | undefined,
+): Promise<void> {
+  if (!isOwnerOnlyEnabled(feishuCfg)) return;
+  return assertOwnerAccessStrict(account, sdk, userOpenId);
 }

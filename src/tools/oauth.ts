@@ -20,7 +20,7 @@ import type { ClawdbotConfig, OpenClawPluginApi } from 'openclaw/plugin-sdk';
 import { Type } from '@sinclair/typebox';
 import type { ConfiguredLarkAccount } from '../core/types';
 import { getLarkAccount } from '../core/accounts';
-import { OwnerAccessDeniedError, assertOwnerAccessStrict } from '../core/owner-policy';
+import { assertOwnerAccessIfRequired, OwnerAccessDeniedError } from '../core/owner-policy';
 import { LarkClient } from '../core/lark-client';
 import { getAppGrantedScopes } from '../core/app-scope-checker';
 import type { LarkTicket } from '../core/lark-ticket';
@@ -275,16 +275,16 @@ export async function executeAuthorize(
   } = params;
   const { appId, appSecret, brand, accountId } = account;
 
-  // 0. Check if the user is the app owner (fail-close: 安全优先).
+  // 0. Owner 检查：当 uat.ownerOnly !== false 时，非 owner 用户不允许发起授权。
   const sdk = LarkClient.fromAccount(account).sdk;
   try {
-    await assertOwnerAccessStrict(account, sdk, senderOpenId);
+    await assertOwnerAccessIfRequired(account, sdk, senderOpenId, account.config);
   } catch (err) {
     if (err instanceof OwnerAccessDeniedError) {
-      log.warn(`non-owner user ${senderOpenId} attempted to authorize`);
+      log.warn(`non-owner user ${senderOpenId} attempted to authorize (ownerOnly mode)`);
       return json({
         error: 'permission_denied',
-        message: '当前应用仅限所有者（App Owner）使用。您没有权限发起授权，无法使用相关功能。',
+        message: `当前应用已启用 Owner-Only 模式（默认），仅限应用所有者使用。\n如需允许所有用户各自授权，请在配置中设置 uat.ownerOnly: false。`,
       });
     }
     throw err;
