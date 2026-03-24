@@ -114,6 +114,17 @@ export async function maybeCreateDynamicAgent(params: {
   await fs.promises.mkdir(workspace, { recursive: true });
   await fs.promises.mkdir(agentDir, { recursive: true });
 
+  // Write agent context metadata for bootstrap hooks to identify this agent.
+  // Hooks (e.g. xiaoan-workspace-seed) read this file to determine the
+  // channel type and inject appropriate templates.
+  const contextDir = path.join(workspace, '.openclaw');
+  await fs.promises.mkdir(contextDir, { recursive: true });
+  await fs.promises.writeFile(
+    path.join(contextDir, 'agent-context.json'),
+    JSON.stringify({ channel: 'feishu', peerKind: 'direct', peerId: senderOpenId, agentId }, null, 2) + '\n',
+    'utf8',
+  );
+
   // Update configuration with new agent and binding
   const updatedCfg: ClawdbotConfig = {
     ...cfg,
