@@ -29,6 +29,66 @@ Additionally, the plugin supports:
 - **👋 Welcome Messages**: Configurable welcome messages for new DM users and when the bot is added to a group
 - **🤖 Dynamic Agent Creation**: Automatically creates an isolated agent instance with its own workspace for each DM user, providing per-user session isolation
 
+## Configuration
+
+### Multi-User OAuth (uat.ownerOnly)
+
+By default, only the app owner can use user-scope tools (Bitable, Calendar, etc.) and initiate OAuth authorization. To allow all users to OAuth with their own Feishu identity:
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "uat": {
+        "ownerOnly": false
+      }
+    }
+  }
+}
+```
+
+When `ownerOnly` is `false`:
+- Any user can initiate OAuth authorization via the Device Flow
+- Each user's token is stored separately (keyed by `appId:userOpenId`)
+- Users can only access resources they have permission for in Feishu
+- Set back to `true` (or remove the field) to restore owner-only mode
+
+### Dynamic Agent Creation
+
+When enabled, the plugin creates an isolated agent instance with its own workspace for each new DM user:
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "dynamicAgentCreation": {
+        "enabled": true,
+        "maxAgents": 20
+      }
+    }
+  }
+}
+```
+
+Each workspace includes an `.openclaw/agent-context.json` metadata file that bootstrap hooks can read to identify the agent type and inject custom templates.
+
+### Welcome Messages
+
+Configure welcome messages for new DM users and group additions:
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "welcomeMessage": "Hello! How can I help you?",
+      "groupWelcomeMessage": "Hi everyone! Mention me to start a conversation."
+    }
+  }
+}
+```
+
+Welcome messages are sent once per user and persisted across gateway restarts.
+
 ## Security & Risk Warnings (Read Before Use)
 
 This plugin integrates with OpenClaw AI automation capabilities and carries inherent risks such as model hallucinations, unpredictable execution, and prompt injection. After you authorize Lark/Feishu permissions, OpenClaw will act under your user identity within the authorized scope, which may lead to high-risk consequences such as leakage of sensitive data or unauthorized operations. Please use with caution.
