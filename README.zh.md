@@ -29,6 +29,66 @@
 - **👋 欢迎消息**：支持配置新用户私聊欢迎语和机器人入群欢迎语
 - **🤖 动态 Agent 创建**：为每个私聊用户自动创建独立的 Agent 实例和工作空间，实现用户级别的会话隔离
 
+## 配置说明
+
+### 多用户 OAuth（uat.ownerOnly）
+
+默认情况下，只有应用 Owner 才能使用用户态工具（多维表格、日历等）和发起 OAuth 授权。如需允许所有用户各自授权：
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "uat": {
+        "ownerOnly": false
+      }
+    }
+  }
+}
+```
+
+当 `ownerOnly` 为 `false` 时：
+- 任何用户都可以通过 Device Flow 发起 OAuth 授权
+- 每个用户的 token 独立存储（按 `appId:userOpenId` 隔离）
+- 用户只能访问自己在飞书中有权限的资源
+- 改回 `true`（或删除该字段）即可恢复 Owner-Only 模式
+
+### 动态 Agent 创建
+
+启用后，插件会为每个新的私聊用户自动创建独立的 Agent 实例和工作空间：
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "dynamicAgentCreation": {
+        "enabled": true,
+        "maxAgents": 20
+      }
+    }
+  }
+}
+```
+
+每个工作空间包含 `.openclaw/agent-context.json` 元数据文件，bootstrap hook 可读取该文件来识别 agent 类型并注入自定义模板。
+
+### 欢迎消息
+
+配置新用户私聊欢迎语和机器人入群欢迎语：
+
+```json
+{
+  "channels": {
+    "feishu": {
+      "welcomeMessage": "你好！有什么可以帮你的吗？",
+      "groupWelcomeMessage": "大家好！@我 即可开始对话。"
+    }
+  }
+}
+```
+
+欢迎消息每个用户只发送一次，且跨 gateway 重启持久化。
+
 ## 安全与风险提示（使用前必读）
 本插件对接 OpenClaw AI 自动化能力，存在模型幻觉、执行不可控、提示词注入等固有风险；授权飞书权限后，OpenClaw 将以您的用户身份在授权范围内执行操作，可能导致敏感数据泄露、越权操作等高风险后果，请您谨慎操作和使用。
 为降低上述风险，插件已在多个层面启用默认安全保护以降低上述风险，但上述风险仍然存在。我们强烈建议不要主动修改任何默认安全配置；一旦放开相关限制，上述风险将显著提高，由此产生的后果需由您自行承担。
