@@ -11,14 +11,15 @@
       }
     }
   },
-  "main": "./dist/index.mjs",
+  "main": "index.ts",
   "types": "./dist/index.d.mts",
   "bin": {
     "openclaw-lark": "bin/openclaw-lark.js"
   },
   "files": [
     "bin/",
-    "dist/",
+    "index.ts",
+    "index.d.ts",
     "skills/",
     "openclaw.plugin.json",
     "README.md",
