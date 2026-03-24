@@ -936,10 +936,12 @@ export async function handleInvokeErrorWithAutoAuth(err: unknown, cfg: ClawdbotC
   const ticket = getTicket();
 
   // --- Path 0：Owner 访问拒绝 → 直接返回友好提示 ---
+  // 当 uat.ownerOnly=false 时此错误不应出现（owner 检查已被跳过），
+  // 此处作为兜底保护，仍保留处理逻辑。
   if (err instanceof OwnerAccessDeniedError) {
     return json({
       error: 'permission_denied',
-      message: '当前应用仅限所有者（App Owner）使用。您没有权限使用相关功能。',
+      message: `当前应用已启用 Owner-Only 模式（默认），仅限应用所有者使用。\n如需允许所有用户各自授权，请在配置中设置 uat.ownerOnly: false。`,
       user_open_id: err.userOpenId,
       // 注意：不序列化 err.appOwnerId，避免泄露 owner 的 open_id
     });
