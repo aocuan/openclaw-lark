@@ -16,7 +16,7 @@ import { LarkClient } from '../core/lark-client';
 import { getAppGrantedScopes, getAppInfo } from '../core/app-scope-checker';
 import { getStoredToken, tokenStatus } from '../core/token-store';
 import { filterSensitiveScopes } from '../core/tool-scopes';
-import { OwnerAccessDeniedError, assertOwnerAccessStrict } from '../core/owner-policy';
+import { assertOwnerAccessIfRequired, OwnerAccessDeniedError } from '../core/owner-policy';
 import { openPlatformDomain } from '../core/domains';
 
 import type { FeishuLocale } from './locale';
@@ -138,9 +138,9 @@ async function executeFeishuAuth(config: OpenClawConfig): Promise<AuthResult> {
     return { kind: 'missing_self_manage', link };
   }
 
-  // Owner 检查（fail-close: 授权命令安全优先）
+  // Owner 检查：当 uat.ownerOnly !== false 时执行（fail-close）
   try {
-    await assertOwnerAccessStrict(acct, sdk, senderOpenId);
+    await assertOwnerAccessIfRequired(acct, sdk, senderOpenId, acct.config);
   } catch (err) {
     if (err instanceof OwnerAccessDeniedError) {
       return { kind: 'owner_only' };

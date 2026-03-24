@@ -41,7 +41,7 @@ import { getAppOwnerFallback } from './app-owner-fallback';
 import { larkLogger } from './lark-logger';
 import { type ToolActionKey, getRequiredScopes } from './scope-manager';
 import { rawLarkRequest } from './raw-request';
-import { assertOwnerAccessStrict } from './owner-policy';
+import { assertOwnerAccessIfRequired } from './owner-policy';
 import {
   AppScopeCheckFailedError,
   AppScopeMissingError,
@@ -330,8 +330,8 @@ export class ToolClient {
       });
     }
 
-    // Owner 检查：非 owner 用户直接拒绝（从 uat-client.ts 迁移至此）
-    await assertOwnerAccessStrict(this.account, this.sdk, userOpenId);
+    // Owner 检查：当 uat.ownerOnly !== false 时，非 owner 用户直接拒绝
+    await assertOwnerAccessIfRequired(this.account, this.sdk, userOpenId, this.account.config);
 
     // 预检：是否有已存储的 token
     const stored = await getStoredToken(this.account.appId, userOpenId);

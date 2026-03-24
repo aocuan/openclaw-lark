@@ -118,9 +118,18 @@ const DedupSchema = z
 
 const ReactionNotificationModeSchema = z.enum(['off', 'own', 'all']).optional();
 
+/**
+ * UAT (User Access Token) configuration.
+ *
+ * `ownerOnly` controls whether only the app owner can use user-scope tools
+ * and initiate OAuth authorization:
+ *   - `true` (default): owner-only, original behavior.
+ *   - `false`: any user can OAuth and access resources under their own identity.
+ */
 export const UATConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
+    ownerOnly: z.boolean().optional(),
     allowedScopes: z.array(z.string()).optional(),
     blockedScopes: z.array(z.string()).optional(),
   })
