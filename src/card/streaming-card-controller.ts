@@ -11,10 +11,12 @@
  * detection to UnavailableGuard.
  */
 
+import { readFile } from 'node:fs/promises';
 import { SILENT_REPLY_TOKEN } from 'openclaw/plugin-sdk/reply-runtime';
 import type { ReplyPayload } from 'openclaw/plugin-sdk';
 import { extractLarkApiCode } from '../core/api-error';
 import { larkLogger } from '../core/lark-logger';
+import { LarkClient } from '../core/lark-client';
 import { registerShutdownHook } from '../core/shutdown-hooks';
 import { sendCardFeishu, updateCardFeishu } from '../messaging/outbound/send';
 import { buildCardContent, STREAMING_ELEMENT_ID, splitReasoningText, stripReasoningTags, toCardKit2 } from './builder';
@@ -37,6 +39,7 @@ import { optimizeMarkdownStyle } from './markdown-style';
 import type {
   CardKitState,
   CardPhase,
+  FooterSessionMetrics,
   ReasoningState,
   StreamingCardDeps,
   StreamingTextState,
@@ -146,6 +149,129 @@ export class StreamingCardController {
 
   private elapsed(): number {
     return Date.now() - this.dispatchStartTime;
+  }
+
+  private needsFooterMetrics(): boolean {
+    const footer = this.deps.resolvedFooter;
+    return footer.tokens || footer.cache || footer.context || footer.model;
+  }
+
+  private async getFooterSessionMetrics(): Promise<FooterSessionMetrics | undefined> {
+    try {
+      const runtime = LarkClient.runtime as {
+        agent?: {
+          session?: {
+            resolveStorePath?: (storePath?: string) => string;
+            loadSessionStore?: (storePath: string) => Record<string, Record<string, unknown>>;
+          };
+        };
+        channel?: {
+          session?: {
+            resolveStorePath?: (storePath?: string) => string;
+          };
+        };
+      } | null;
+      if (!runtime) return undefined;
+
+      const cfgWithSession = this.deps.cfg as { sessions?: { store?: string }; session?: { store?: string } };
+      const sessionStorePath = cfgWithSession.sessions?.store ?? cfgWithSession.session?.store;
+      const key = this.deps.sessionKey.trim().toLowerCase();
+
+      const sessionApi = runtime.agent?.session;
+      if (sessionApi?.resolveStorePath && sessionApi?.loadSessionStore) {
+        const storePath = sessionApi.resolveStorePath(sessionStorePath);
+        const store = sessionApi.loadSessionStore(storePath);
+        const entry = store[key];
+        if (!entry || typeof entry !== 'object') {
+          log.debug('footer metrics lookup: session entry missing', {
+            sessionKey: this.deps.sessionKey,
+            normalizedSessionKey: key,
+            storePath,
+            source: 'runtime.agent.session',
+          });
+          return undefined;
+        }
+
+        const metrics: FooterSessionMetrics = {
+          inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+          outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+          cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+          cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+          totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
+          totalTokensFresh: typeof entry.totalTokensFresh === 'boolean' ? entry.totalTokensFresh : undefined,
+          contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
+          model: typeof entry.model === 'string' ? entry.model : undefined,
+        };
+        log.debug('footer metrics lookup: session entry found', {
+          sessionKey: this.deps.sessionKey,
+          normalizedSessionKey: key,
+          storePath,
+          source: 'runtime.agent.session',
+          hasMetrics: !!(
+            metrics.inputTokens != null ||
+            metrics.outputTokens != null ||
+            metrics.cacheRead != null ||
+            metrics.cacheWrite != null ||
+            metrics.totalTokens != null ||
+            metrics.contextTokens != null ||
+            metrics.model
+          ),
+        });
+        return metrics;
+      }
+
+      const channelSession = runtime.channel?.session;
+      if (!channelSession?.resolveStorePath) {
+        return undefined;
+      }
+
+      const storePath = channelSession.resolveStorePath(sessionStorePath);
+      const raw = await readFile(storePath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      const store = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, Record<string, unknown>>)
+        : {};
+      const entry = store[key];
+      if (!entry || typeof entry !== 'object') {
+        log.debug('footer metrics lookup: session entry missing', {
+          sessionKey: this.deps.sessionKey,
+          normalizedSessionKey: key,
+          storePath,
+          source: 'channel.session.file',
+        });
+        return undefined;
+      }
+
+      const metrics: FooterSessionMetrics = {
+        inputTokens: typeof entry.inputTokens === 'number' ? entry.inputTokens : undefined,
+        outputTokens: typeof entry.outputTokens === 'number' ? entry.outputTokens : undefined,
+        cacheRead: typeof entry.cacheRead === 'number' ? entry.cacheRead : undefined,
+        cacheWrite: typeof entry.cacheWrite === 'number' ? entry.cacheWrite : undefined,
+        totalTokens: typeof entry.totalTokens === 'number' ? entry.totalTokens : undefined,
+        totalTokensFresh: typeof entry.totalTokensFresh === 'boolean' ? entry.totalTokensFresh : undefined,
+        contextTokens: typeof entry.contextTokens === 'number' ? entry.contextTokens : undefined,
+        model: typeof entry.model === 'string' ? entry.model : undefined,
+      };
+      log.debug('footer metrics lookup: session entry found', {
+        sessionKey: this.deps.sessionKey,
+        normalizedSessionKey: key,
+        storePath,
+        source: 'channel.session.file',
+        hasMetrics: !!(
+          metrics.inputTokens != null ||
+          metrics.outputTokens != null ||
+          metrics.cacheRead != null ||
+          metrics.cacheWrite != null ||
+          metrics.totalTokens != null ||
+          metrics.contextTokens != null ||
+          metrics.model
+        ),
+      });
+      return metrics;
+    } catch (err) {
+      log.warn('footer metrics lookup failed', { error: String(err), sessionKey: this.deps.sessionKey });
+      return undefined;
+    }
   }
 
   constructor(deps: StreamingCardDeps) {
@@ -401,6 +527,7 @@ export class StreamingCardController {
     if (this.cardCreationPromise) await this.cardCreationPromise;
 
     const errorEffectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
+    const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
     if (this.cardKit.cardMessageId) {
       try {
         const rawErrorText = this.text.accumulatedText
@@ -420,6 +547,7 @@ export class StreamingCardController {
           elapsedMs: this.elapsed(),
           isError: true,
           footer: this.deps.resolvedFooter,
+          footerMetrics,
         });
         if (errorEffectiveCardId) {
           await this.closeStreamingAndUpdate(errorEffectiveCardId, errorCard, 'onError');
@@ -490,6 +618,7 @@ export class StreamingCardController {
           },
           this.imageResolver,
         );
+        const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
 
         const completeCard = buildCardContent('complete', {
           text: terminalContent.text,
@@ -497,6 +626,7 @@ export class StreamingCardController {
           reasoningElapsedMs: this.reasoning.reasoningElapsedMs || undefined,
           elapsedMs: this.elapsed(),
           footer: this.deps.resolvedFooter,
+          footerMetrics,
         });
 
         if (idleEffectiveCardId) {
@@ -554,15 +684,16 @@ export class StreamingCardController {
       if (this.cardCreationPromise) await this.cardCreationPromise;
 
       const effectiveCardId = this.cardKit.cardKitCardId ?? this.cardKit.originalCardKitCardId;
+      const elapsedMs = Date.now() - this.dispatchStartTime;
+      const terminalContent = prepareTerminalCardContent(
+        {
+          text: this.text.accumulatedText || 'Aborted.',
+          reasoningText: this.reasoning.accumulatedReasoningText || undefined,
+        },
+        this.imageResolver,
+      );
+      const footerMetrics = this.needsFooterMetrics() ? await this.getFooterSessionMetrics() : undefined;
       if (effectiveCardId) {
-        const elapsedMs = Date.now() - this.dispatchStartTime;
-        const terminalContent = prepareTerminalCardContent(
-          {
-            text: this.text.accumulatedText || 'Aborted.',
-            reasoningText: this.reasoning.accumulatedReasoningText || undefined,
-          },
-          this.imageResolver,
-        );
         const abortCardContent = buildCardContent('complete', {
           text: terminalContent.text,
           reasoningText: terminalContent.reasoningText,
@@ -570,19 +701,12 @@ export class StreamingCardController {
           elapsedMs,
           isAborted: true,
           footer: this.deps.resolvedFooter,
+          footerMetrics,
         });
         await this.closeStreamingAndUpdate(effectiveCardId, abortCardContent, 'abortCard');
         log.info('abortCard completed', { effectiveCardId });
       } else if (this.cardKit.cardMessageId) {
         // IM fallback: 卡片不是通过 CardKit 发的，用 im.message.patch 更新
-        const elapsedMs = Date.now() - this.dispatchStartTime;
-        const terminalContent = prepareTerminalCardContent(
-          {
-            text: this.text.accumulatedText || 'Aborted.',
-            reasoningText: this.reasoning.accumulatedReasoningText || undefined,
-          },
-          this.imageResolver,
-        );
         const abortCard = buildCardContent('complete', {
           text: terminalContent.text,
           reasoningText: terminalContent.reasoningText,
@@ -590,6 +714,7 @@ export class StreamingCardController {
           elapsedMs,
           isAborted: true,
           footer: this.deps.resolvedFooter,
+          footerMetrics,
         });
         await updateCardFeishu({
           cfg: this.deps.cfg,
