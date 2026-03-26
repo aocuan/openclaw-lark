@@ -41,6 +41,7 @@ import { injectInboundHandler } from './handler-registry';
 import { dispatchToAgent } from './dispatch';
 import { resolveFeishuGroupConfig, splitLegacyGroupAllowFrom } from './policy';
 import { maybeCreateDynamicAgent, type DynamicAgentCreationConfig } from '../../core/dynamic-agent';
+import { getAppOwnerFallback } from '../../core/app-owner-fallback';
 
 const logger = larkLogger('inbound/handler');
 
@@ -221,20 +222,51 @@ export async function handleFeishuMessage(params: {
         peer: { kind: 'direct', id: ctx.senderId },
       });
       if (preRoute.matchedBy === 'default') {
+        // Owner 检查：owner 绑定到默认 agent 而非创建动态 agent
+        let ownerHandled = false;
         try {
-          const result = await maybeCreateDynamicAgent({
-            cfg: accountScopedCfg,
-            runtime: core,
-            senderOpenId: ctx.senderId,
-            dynamicCfg,
-            log: (msg) => log(msg),
-          });
-          if (result.created) {
-            effectiveAccountScopedCfg = result.updatedCfg;
-            log(`feishu[${account.accountId}]: dynamic agent created for ${ctx.senderId}`);
+          if (!account.configured) throw new Error('account not configured');
+          const sdk = LarkClient.fromAccount(account).sdk;
+          const ownerOpenId = await getAppOwnerFallback(account, sdk);
+          if (ownerOpenId && ownerOpenId === ctx.senderId) {
+            const defaultAgentId = preRoute.agentId;
+            const existingBindings = accountScopedCfg.bindings ?? [];
+            const updatedCfg: ClawdbotConfig = {
+              ...accountScopedCfg,
+              bindings: [
+                ...existingBindings,
+                {
+                  agentId: defaultAgentId,
+                  match: { channel: 'feishu', peer: { kind: 'direct', id: ctx.senderId } },
+                },
+              ],
+            };
+            await core.config.writeConfigFile(updatedCfg);
+            effectiveAccountScopedCfg = updatedCfg;
+            log(`feishu[${account.accountId}]: owner ${ctx.senderId} bound to default agent "${defaultAgentId}"`);
+            ownerHandled = true;
           }
         } catch (err) {
-          error(`feishu[${account.accountId}]: dynamic agent creation failed: ${String(err)}`);
+          // fail-open: owner 查询失败按非 owner 处理
+          log(`feishu[${account.accountId}]: owner check failed, falling through: ${String(err)}`);
+        }
+
+        if (!ownerHandled) {
+          try {
+            const result = await maybeCreateDynamicAgent({
+              cfg: accountScopedCfg,
+              runtime: core,
+              senderOpenId: ctx.senderId,
+              dynamicCfg,
+              log: (msg) => log(msg),
+            });
+            if (result.created) {
+              effectiveAccountScopedCfg = result.updatedCfg;
+              log(`feishu[${account.accountId}]: dynamic agent created for ${ctx.senderId}`);
+            }
+          } catch (err) {
+            error(`feishu[${account.accountId}]: dynamic agent creation failed: ${String(err)}`);
+          }
         }
       }
     }
