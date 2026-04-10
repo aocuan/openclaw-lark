@@ -14,7 +14,6 @@
 
 import type { ClawdbotConfig } from 'openclaw/plugin-sdk';
 // NOTE: This is the SDK-standard interactive pipeline.
-// eslint-disable-next-line import-x/no-unresolved
 import { dispatchPluginInteractiveHandler } from 'openclaw/plugin-sdk/plugin-runtime';
 import { larkLogger } from '../core/lark-logger';
 import { sendCardFeishu, sendMessageFeishu, updateCardFeishu } from '../messaging/outbound/send';
@@ -27,13 +26,6 @@ interface FeishuCardActionTriggerEvent {
   open_message_id?: string;
   context?: { open_chat_id?: string; open_message_id?: string };
   action?: { value?: { action?: string } };
-}
-
-function parseRouteKey(action: string): { namespace: string; payload: string } {
-  const raw = String(action || '').trim();
-  const idx = raw.indexOf(':');
-  if (idx <= 0) return { namespace: raw, payload: '' };
-  return { namespace: raw.slice(0, idx), payload: raw.slice(idx + 1) };
 }
 
 function extractBasics(data: unknown): {
@@ -57,6 +49,29 @@ function extractBasics(data: unknown): {
   } catch {
     return null;
   }
+}
+
+export type FeishuInteractiveHandlerResponse = unknown;
+
+export interface FeishuInteractiveHandlerContext {
+  channel: 'feishu';
+  accountId: string;
+  senderId?: string;
+  conversationId?: string;
+  messageId?: string;
+  namespace: string;
+  payload: string;
+  action: string;
+  rawEvent: unknown;
+  respond: {
+    reply: (args: { text: string }) => Promise<void>;
+    followUp: (args: { text: string }) => Promise<void>;
+    /**
+     * Best-effort "edit current message" mapping.
+     * In Feishu, we prefer updating the original interactive card when possible.
+     */
+    editMessage: (args: { text?: string; blocks?: unknown[] }) => Promise<void>;
+  };
 }
 
 function buildMarkdownCard(text: string): Record<string, unknown> {
@@ -94,32 +109,7 @@ export async function dispatchFeishuPluginInteractiveHandler(params: {
   if (!basics) return undefined;
   if (!basics.action) return undefined;
 
-  const { namespace, payload } = parseRouteKey(basics.action);
-  if (!namespace) return undefined;
-
-  const ctx: any = {
-    channel: 'slack',
-    accountId: params.accountId,
-    conversationId: basics.openChatId || '',
-    senderId: basics.senderOpenId,
-    auth: {
-      isAuthorizedSender: true,
-    },
-    interaction: {
-      kind: 'button',
-      data: basics.action,
-      namespace,
-      payload,
-      actionId: namespace,
-      messageTs: basics.openMessageId,
-    },
-    parentConversationId: undefined,
-    threadId: undefined,
-    rawEvent: params.data,
-  };
-
-  const respond = {
-    acknowledge: async () => {},
+  const respond: FeishuInteractiveHandlerContext['respond'] = {
     reply: async (args: { text: string }) => {
       if (!basics.openChatId || !String(args?.text || '').trim()) return;
       await sendMessageFeishu({
@@ -195,16 +185,49 @@ export async function dispatchFeishuPluginInteractiveHandler(params: {
   };
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (dispatchPluginInteractiveHandler as any)({
-      channel: 'slack',
+    const dedupeId = `feishu:${params.accountId}:${basics.openChatId ?? '-'}:${basics.openMessageId ?? '-'}:${
+      basics.senderOpenId ?? '-'
+    }:${basics.action}`;
+
+    let cardResponse: FeishuInteractiveHandlerResponse | undefined;
+    const result = await dispatchPluginInteractiveHandler<{
+      channel: 'feishu';
+      namespace: string;
+      // handler returns unknown so Feishu can synchronously return {toast, card}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handler: (ctx: FeishuInteractiveHandlerContext) => Promise<any> | any;
+    }>({
+      channel: 'feishu',
       data: basics.action,
-      ctx,
-      respond,
+      dedupeId,
+      invoke: async (match: {
+        registration: { handler: (ctx: FeishuInteractiveHandlerContext) => Promise<unknown> | unknown };
+        namespace: string;
+        payload: string;
+      }) => {
+        const { registration, namespace, payload } = match;
+        const handlerCtx: FeishuInteractiveHandlerContext = {
+          channel: 'feishu',
+          accountId: params.accountId,
+          senderId: basics.senderOpenId,
+          conversationId: basics.openChatId,
+          messageId: basics.openMessageId,
+          namespace,
+          payload,
+          action: basics.action,
+          rawEvent: params.data,
+          respond,
+        };
+        cardResponse = await registration.handler(handlerCtx);
+        // If the handler returns a card response, treat it as handled.
+        return { handled: cardResponse !== undefined };
+      },
     });
-    return result ?? undefined;
+
+    if (!result.matched) return undefined;
+    return cardResponse;
   } catch (err) {
-    log.warn(`interactive dispatch failed (namespace=${namespace}): ${String(err)}`);
+    log.warn(`interactive dispatch failed: ${String(err)}`);
     return {
       toast: {
         type: 'error',
