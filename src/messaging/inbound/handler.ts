@@ -28,6 +28,8 @@ import { LarkClient } from '../../core/lark-client';
 import { larkLogger } from '../../core/lark-logger';
 import { ticketElapsed } from '../../core/lark-ticket';
 import { threadScopedKey } from '../../channel/chat-queue';
+import { type DynamicAgentCreationConfig, maybeCreateDynamicAgent } from '../../core/dynamic-agent';
+import { getAppOwnerFallback } from '../../core/app-owner-fallback';
 import { parseMessageEvent } from './parse';
 import {
   prefetchUserNames,
@@ -40,8 +42,6 @@ import { type GateResult, checkMessageGate, readFeishuAllowFromStore } from './g
 import { injectInboundHandler } from './handler-registry';
 import { dispatchToAgent } from './dispatch';
 import { resolveFeishuGroupConfig, splitLegacyGroupAllowFrom } from './policy';
-import { maybeCreateDynamicAgent, type DynamicAgentCreationConfig } from '../../core/dynamic-agent';
-import { getAppOwnerFallback } from '../../core/app-owner-fallback';
 
 const logger = larkLogger('inbound/handler');
 

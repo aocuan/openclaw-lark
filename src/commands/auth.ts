@@ -16,7 +16,7 @@ import { LarkClient } from '../core/lark-client';
 import { getAppGrantedScopes, getAppInfo } from '../core/app-scope-checker';
 import { getStoredToken, tokenStatus } from '../core/token-store';
 import { filterSensitiveScopes } from '../core/tool-scopes';
-import { assertOwnerAccessIfRequired, OwnerAccessDeniedError } from '../core/owner-policy';
+import { OwnerAccessDeniedError, assertOwnerAccessIfRequired } from '../core/owner-policy';
 import { openPlatformDomain } from '../core/domains';
 
 import type { FeishuLocale } from './locale';

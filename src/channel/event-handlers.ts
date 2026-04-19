@@ -27,10 +27,10 @@ import { withTicket } from '../core/lark-ticket';
 import { larkLogger } from '../core/lark-logger';
 import { handleCardAction } from '../tools/auto-auth';
 import { handleAskUserAction } from '../tools/ask-user-question';
-import { buildQueueKey, enqueueFeishuChatTask, getActiveDispatcher, hasActiveTask } from './chat-queue';
-import { extractRawTextFromEvent, isLikelyAbortText } from './abort-detect';
 import { sendMessageFeishu } from '../messaging/outbound/send';
 import { getLarkAccount } from '../core/accounts';
+import { buildQueueKey, enqueueFeishuChatTask, getActiveDispatcher, hasActiveTask } from './chat-queue';
+import { extractRawTextFromEvent, isLikelyAbortText } from './abort-detect';
 import type { MonitorContext } from './types';
 import { dispatchFeishuPluginInteractiveHandler } from './interactive-dispatch';
 

@@ -313,9 +313,9 @@ export interface FeishuSendResult {
  * Configuration for per-user dynamic agent creation.
  * Matches the upstream `extensions/feishu/src/types.ts` definition.
  */
-export type DynamicAgentCreationConfig = {
+export interface DynamicAgentCreationConfig {
   enabled?: boolean;
   workspaceTemplate?: string;
   agentDirTemplate?: string;
   maxAgents?: number;
-};
+}
