@@ -20,7 +20,7 @@ import type { ClawdbotConfig, OpenClawPluginApi } from 'openclaw/plugin-sdk';
 import { Type } from '@sinclair/typebox';
 import type { ConfiguredLarkAccount } from '../core/types';
 import { getLarkAccount } from '../core/accounts';
-import { assertOwnerAccessIfRequired, OwnerAccessDeniedError } from '../core/owner-policy';
+import { OwnerAccessDeniedError, assertOwnerAccessIfRequired } from '../core/owner-policy';
 import { LarkClient } from '../core/lark-client';
 import { getAppGrantedScopes } from '../core/app-scope-checker';
 import type { LarkTicket } from '../core/lark-ticket';

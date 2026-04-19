@@ -22,11 +22,11 @@ export type { DynamicAgentCreationConfig } from '../messaging/types';
 // Types
 // ---------------------------------------------------------------------------
 
-export type MaybeCreateDynamicAgentResult = {
+export interface MaybeCreateDynamicAgentResult {
   created: boolean;
   updatedCfg: ClawdbotConfig;
   agentId?: string;
-};
+}
 
 // ---------------------------------------------------------------------------
 // Public API
