@@ -427,7 +427,19 @@ export function registerFeishuTaskTaskTool(api: OpenClawPluginApi): void {
                 };
               }
 
-              if (p.members) taskData.members = p.members;
+              // 合并 current_user_id：若 members 中不包含当前用户，自动补为 follower，
+              // 确保创建者对任务具有访问/编辑权限（飞书 Task v2 的对象权限基于 members）。
+              const members = p.members ? [...p.members] : [];
+              if (p.current_user_id && !members.some((m) => m.id === p.current_user_id)) {
+                members.push({
+                  id: p.current_user_id,
+                  type: 'user',
+                  role: 'follower',
+                });
+                log.info(`create: auto-added current_user_id ${p.current_user_id} as follower`);
+              }
+              if (members.length > 0) taskData.members = members;
+
               if (p.repeat_rule) taskData.repeat_rule = p.repeat_rule;
               if (p.tasklists) taskData.tasklists = p.tasklists;
 
