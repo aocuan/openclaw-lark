@@ -28,7 +28,13 @@ import { LarkClient } from '../../core/lark-client';
 import { larkLogger } from '../../core/lark-logger';
 import { ticketElapsed } from '../../core/lark-ticket';
 import { threadScopedKey } from '../../channel/chat-queue';
-import { type DynamicAgentCreationConfig, maybeCreateDynamicAgent } from '../../core/dynamic-agent';
+import {
+  type DynamicAgentCreationConfig,
+  type MaybeCreateDynamicAgentResult,
+  maybeCreateDynamicAgent,
+  writeConfigWithRetry,
+} from '../../core/dynamic-agent';
+import { sendTextLark } from '../outbound/deliver';
 import { getAppOwnerFallback } from '../../core/app-owner-fallback';
 import { parseMessageEvent } from './parse';
 import {
@@ -224,48 +230,126 @@ export async function handleFeishuMessage(params: {
       if (preRoute.matchedBy === 'default') {
         // Owner 检查：owner 绑定到默认 agent 而非创建动态 agent
         let ownerHandled = false;
+        let ownerWriteFailed = false;
+        let ownerOpenId: string | undefined;
         try {
           if (!account.configured) throw new Error('account not configured');
           const sdk = LarkClient.fromAccount(account).sdk;
-          const ownerOpenId = await getAppOwnerFallback(account, sdk);
-          if (ownerOpenId && ownerOpenId === ctx.senderId) {
-            const defaultAgentId = preRoute.agentId;
-            const existingBindings = accountScopedCfg.bindings ?? [];
-            const updatedCfg: ClawdbotConfig = {
-              ...accountScopedCfg,
-              bindings: [
-                ...existingBindings,
-                {
-                  agentId: defaultAgentId,
-                  match: { channel: 'feishu', peer: { kind: 'direct', id: ctx.senderId } },
-                },
-              ],
-            };
-            await core.config.writeConfigFile(updatedCfg);
-            effectiveAccountScopedCfg = updatedCfg;
-            log(`feishu[${account.accountId}]: owner ${ctx.senderId} bound to default agent "${defaultAgentId}"`);
-            ownerHandled = true;
-          }
+          ownerOpenId = (await getAppOwnerFallback(account, sdk)) ?? undefined;
         } catch (err) {
           // fail-open: owner 查询失败按非 owner 处理
           log(`feishu[${account.accountId}]: owner check failed, falling through: ${String(err)}`);
         }
 
-        if (!ownerHandled) {
+        if (ownerOpenId && ownerOpenId === ctx.senderId) {
+          const defaultAgentId = preRoute.agentId;
           try {
-            const result = await maybeCreateDynamicAgent({
+            const latestCfg = core.config.loadConfig() as ClawdbotConfig;
+            const existingBindings = latestCfg.bindings ?? [];
+            const alreadyBound = existingBindings.some(
+              (b) =>
+                b.match?.channel === 'feishu' &&
+                b.match?.peer?.kind === 'direct' &&
+                b.match?.peer?.id === ctx.senderId,
+            );
+            const updatedCfg: ClawdbotConfig = alreadyBound
+              ? latestCfg
+              : {
+                  ...latestCfg,
+                  bindings: [
+                    ...existingBindings,
+                    {
+                      agentId: defaultAgentId,
+                      match: { channel: 'feishu', peer: { kind: 'direct', id: ctx.senderId } },
+                    },
+                  ],
+                };
+            if (!alreadyBound) {
+              await writeConfigWithRetry(core, updatedCfg, (msg) => log(msg));
+            }
+            effectiveAccountScopedCfg = updatedCfg;
+            log(`feishu[${account.accountId}]: owner ${ctx.senderId} bound to default agent "${defaultAgentId}"`);
+            ownerHandled = true;
+          } catch (err) {
+            // owner 已识别但 cfg 写入失败:不能 fail-open 挂主 workspace
+            // (owner 应该被绑定但失败了,继续 dispatch 等于行为不一致)
+            ownerWriteFailed = true;
+            error(
+              `feishu[${account.accountId}]: owner binding write failed for ${ctx.senderId}: ${String(err)}`,
+            );
+          }
+        }
+
+        if (ownerWriteFailed) {
+          await tryNotifyDmUser({
+            cfg: accountScopedCfg,
+            accountId: account.accountId,
+            senderOpenId: ctx.senderId,
+            replyToMessageId,
+            messageId: ctx.messageId,
+            text: '会话初始化失败,请稍后再试。如果持续出现请联系管理员。',
+            log,
+            error,
+          });
+          return;
+        }
+
+        if (!ownerHandled) {
+          let result: MaybeCreateDynamicAgentResult;
+          try {
+            result = await maybeCreateDynamicAgent({
               cfg: accountScopedCfg,
               runtime: core,
               senderOpenId: ctx.senderId,
               dynamicCfg,
               log: (msg) => log(msg),
             });
-            if (result.created) {
-              effectiveAccountScopedCfg = result.updatedCfg;
-              log(`feishu[${account.accountId}]: dynamic agent created for ${ctx.senderId}`);
-            }
           } catch (err) {
-            error(`feishu[${account.accountId}]: dynamic agent creation failed: ${String(err)}`);
+            // maybeCreateDynamicAgent 内部应该已经把所有错误转成 status='failed',
+            // 这里仍然兜底,避免任何未预期异常使流程继续走 fail-open。
+            error(`feishu[${account.accountId}]: dynamic agent creation threw unexpectedly: ${String(err)}`);
+            result = {
+              status: 'failed',
+              updatedCfg: accountScopedCfg,
+              created: false,
+              error: err instanceof Error ? err : new Error(String(err)),
+            };
+          }
+
+          switch (result.status) {
+            case 'created':
+            case 'binding_added':
+              effectiveAccountScopedCfg = result.updatedCfg;
+              log(`feishu[${account.accountId}]: dynamic agent ${result.status} for ${ctx.senderId}`);
+              break;
+            case 'already_bound':
+              // 锁内重新读取后发现已被其它消息绑过,直接用最新 cfg。
+              effectiveAccountScopedCfg = result.updatedCfg;
+              break;
+            case 'max_agents_reached':
+            case 'failed': {
+              // fail-closed: 不再静默挂主 workspace,
+              // 而是给用户一个明确提示并停止 dispatch。
+              const userText =
+                result.status === 'max_agents_reached'
+                  ? '会话名额已满,管理员需要调整 dynamicAgentCreation.maxAgents 后才能继续。'
+                  : '会话初始化失败,请稍后再试。如果持续出现请联系管理员。';
+              error(
+                `feishu[${account.accountId}]: dynamic agent ${result.status} for ${ctx.senderId}` +
+                  (result.error ? ` — ${result.error.message}` : ''),
+              );
+              await tryNotifyDmUser({
+                cfg: accountScopedCfg,
+                accountId: account.accountId,
+                senderOpenId: ctx.senderId,
+                replyToMessageId,
+                messageId: ctx.messageId,
+                text: userText,
+                log,
+                error,
+              });
+              return;
+            }
           }
         }
       }
@@ -299,3 +383,32 @@ export async function handleFeishuMessage(params: {
 }
 
 injectInboundHandler(handleFeishuMessage);
+
+/**
+ * 私聊场景下 fail-closed 时给用户回一条文本提示。
+ * 出站发送任何失败都被吞掉,因为入站 handler 不应再因为提示失败而抛错。
+ */
+async function tryNotifyDmUser(params: {
+  cfg: ClawdbotConfig;
+  accountId: string;
+  senderOpenId: string;
+  replyToMessageId?: string;
+  messageId?: string;
+  text: string;
+  log: (msg: string) => void;
+  error: (msg: string) => void;
+}): Promise<void> {
+  const { cfg, accountId, senderOpenId, replyToMessageId, messageId, text, log, error } = params;
+  try {
+    await sendTextLark({
+      cfg,
+      to: `user:${senderOpenId}`,
+      text,
+      replyToMessageId: replyToMessageId ?? messageId,
+      accountId,
+    });
+    log(`feishu[${accountId}]: notified ${senderOpenId} of dynamic-agent failure`);
+  } catch (err) {
+    error(`feishu[${accountId}]: failed to notify ${senderOpenId} of dynamic-agent failure: ${String(err)}`);
+  }
+}
