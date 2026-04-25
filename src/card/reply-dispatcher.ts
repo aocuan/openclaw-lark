@@ -180,6 +180,25 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
   // ---- dispatchFullyComplete flag (static mode) ----
   let dispatchFullyComplete = false;
 
+  // ---- Typing TTL keepalive ----
+  // OpenClaw core 给 typingTtlMs 硬编码 120s。长 reasoning / 长 tool call 期间
+  // 如果不触发任何 callback,reaction 会被 cleanup 掉。我们的策略:
+  //   1. 事件驱动 — 每个有意义的进度事件刷新一次(诚实反映 AI 在工作)
+  //   2. tool 期间 interval 兜底 — OpenClaw 在 tool 内部不发 update,plugin 起 60s
+  //      心跳直到 onToolResult。tool 之外的沉默期(provider 卡死)不刷,让
+  //      reaction 自然消失,fail-fast 给用户提示。
+  let typingHandle: { refreshTypingTtl?: () => void } | null = null;
+  let toolHeartbeat: ReturnType<typeof setInterval> | null = null;
+  const stopToolHeartbeat = (): void => {
+    if (toolHeartbeat) {
+      clearInterval(toolHeartbeat);
+      toolHeartbeat = null;
+    }
+  };
+  const refreshTyping = (): void => {
+    typingHandle?.refreshTypingTtl?.();
+  };
+
   // ---- Build dispatcher ----
   const { dispatcher, replyOptions, markDispatchIdle } = core.channel.reply.createReplyDispatcherWithTyping({
     responsePrefix: prefixContext.responsePrefix,
@@ -401,25 +420,67 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
   // ---- Abort card (delegates to controller or no-op for static) ----
   const abortCard = controller ? () => controller.abortCard() : async () => {};
 
+  // wrap core 提供的 onTypingController / onTypingCleanup,把 typing 实例保存下来
+  // 给后面的事件 callbacks 用。core 自己生成这两个 callback 注入到 replyOptions 里;
+  // 我们叠加一层 wrapper 即可,不破坏原有行为。
+  const coreOnTypingController = replyOptions.onTypingController;
+  const coreOnTypingCleanup = replyOptions.onTypingCleanup;
+
   return {
     dispatcher,
     replyOptions: {
       ...replyOptions,
-      ...(controller
-        ? {
-            shouldEmitToolResult: () => false,
-            shouldEmitToolOutput: () => false,
-          }
-        : {}),
       onModelSelected: (ctx: { provider: string; model: string; thinkLevel: string | undefined }) => {
         prefixContext.onModelSelected(ctx);
       },
       disableBlockStreaming: !enableBlockStreaming,
+      // streaming 模式接管所有进度回调:
+      //   - shouldEmitToolResult/Output: 由 streaming card 自己绘制 tool 节点,
+      //     避免 SDK 默认文本 emission 重复
+      //   - onTypingController/Cleanup: 抓住 typing 实例,给后面 refreshTyping 用
+      //   - onReasoningStream/onPartialReply/onAssistantMessageStart/onItemEvent/
+      //     onToolStart/onToolResult: 事件驱动 typing 续命(refreshTyping)+ 转发给
+      //     streaming card controller。tool 内部 OpenClaw 不发 update 事件,所以
+      //     onToolStart 时再起一个 60s interval 兜底,onToolResult 停。
+      // static 模式不接管这些回调,保留 SDK 默认行为。
       ...(controller
         ? {
-            onReasoningStream: (payload: ReplyPayload) => controller.onReasoningStream(payload),
-            onPartialReply: (payload: ReplyPayload) => controller.onPartialReply(payload),
-            onToolStart: (payload: { name?: string; phase?: string }) => controller.onToolStart(payload),
+            shouldEmitToolResult: () => false,
+            shouldEmitToolOutput: () => false,
+            onTypingController: (typing: Parameters<NonNullable<typeof coreOnTypingController>>[0]) => {
+              typingHandle = typing;
+              coreOnTypingController?.(typing);
+            },
+            onTypingCleanup: () => {
+              stopToolHeartbeat();
+              typingHandle = null;
+              coreOnTypingCleanup?.();
+            },
+            onReasoningStream: (payload: ReplyPayload) => {
+              refreshTyping();
+              return controller.onReasoningStream(payload);
+            },
+            onPartialReply: (payload: ReplyPayload) => {
+              refreshTyping();
+              return controller.onPartialReply(payload);
+            },
+            onAssistantMessageStart: () => {
+              refreshTyping();
+            },
+            onItemEvent: () => {
+              refreshTyping();
+            },
+            onToolStart: (payload: { name?: string; phase?: string }) => {
+              refreshTyping();
+              if (!toolHeartbeat) {
+                toolHeartbeat = setInterval(refreshTyping, 60_000);
+              }
+              return controller.onToolStart(payload);
+            },
+            onToolResult: () => {
+              stopToolHeartbeat();
+              refreshTyping();
+            },
           }
         : {}),
     },
