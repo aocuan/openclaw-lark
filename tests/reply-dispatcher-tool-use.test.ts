@@ -145,8 +145,14 @@ describe('reply-dispatcher tool_use mode', () => {
 
     expect(result.replyOptions).toHaveProperty('onReasoningStream');
     expect(result.replyOptions).not.toHaveProperty('onReasoningEnd');
-    expect(result.replyOptions).not.toHaveProperty('onAssistantMessageStart');
     expect(result.replyOptions).toHaveProperty('onToolStart');
+    // streaming mode 接管以下回调以驱动 typing TTL 续命(防止 reaction 在长
+    // reasoning / 长 tool 期间因 120s TTL 提前消失)。
+    expect(result.replyOptions).toHaveProperty('onAssistantMessageStart');
+    expect(result.replyOptions).toHaveProperty('onItemEvent');
+    expect(result.replyOptions).toHaveProperty('onToolResult');
+    expect(result.replyOptions).toHaveProperty('onTypingController');
+    expect(result.replyOptions).toHaveProperty('onTypingCleanup');
     expect((result.replyOptions.shouldEmitToolResult as (() => boolean))()).toBe(false);
     expect((result.replyOptions.shouldEmitToolOutput as (() => boolean))()).toBe(false);
 
