@@ -28,6 +28,7 @@ import type { FeishuMessageEvent } from '../types';
 import { getLarkAccount } from '../../core/accounts';
 import { LarkClient } from '../../core/lark-client';
 import { larkLogger } from '../../core/lark-logger';
+import { isOwnerOnlyEnabled } from '../../core/owner-policy';
 import { ticketElapsed } from '../../core/lark-ticket';
 import { threadScopedKey } from '../../channel/chat-queue';
 import {
@@ -91,9 +92,17 @@ export async function handleFeishuMessage(params: {
   //   这里将 cfg.channels.feishu 替换为经过 getLarkAccount() 合并后的
   //   accountFeishuCfg（= base config + account override），确保下游所有 SDK 调用
   //   都能正确读取当前 account 的配置。
+  // 多用户模式（uat.ownerOnly=false）下：禁用 SDK 内置的 access-group 命令鉴权，
+  // 让飞书插件的 allowFrom（含 OAuth 授权用户）独享命令授权决策。
+  // 默认（ownerOnly=true）保持 SDK 原有 access-group 行为不变。
+  // 见上游 issue #132 (larksuite/openclaw-lark): 非 owner 用户的 /help、/new
+  // 等斜杠命令会被 SDK 默认开启的 useAccessGroups 静默拦截。
   const accountScopedCfg: ClawdbotConfig = {
     ...cfg,
     channels: { ...cfg.channels, feishu: accountFeishuCfg },
+    ...(isOwnerOnlyEnabled(accountFeishuCfg)
+      ? {}
+      : { commands: { ...(cfg.commands ?? {}), useAccessGroups: false } }),
   };
 
   const log = runtime?.log ?? ((...args: unknown[]) => logger.info(args.map(String).join(' ')));
