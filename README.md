@@ -51,6 +51,7 @@ When `ownerOnly` is `false`:
 - Any user can initiate OAuth authorization via the Device Flow
 - Each user's token is stored separately (keyed by `appId:userOpenId`)
 - Users can only access resources they have permission for in Feishu
+- All OAuth-authorized users can run slash commands (`/help`, `/new`, `/status`, etc.), bypassing OpenClaw's built-in access-group restriction (Owner-only by default). See upstream issue [#132](https://github.com/larksuite/openclaw-lark/issues/132)
 - Set back to `true` (or remove the field) to restore owner-only mode
 
 ### Dynamic Agent Creation

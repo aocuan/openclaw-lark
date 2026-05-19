@@ -51,6 +51,7 @@
 - 任何用户都可以通过 Device Flow 发起 OAuth 授权
 - 每个用户的 token 独立存储（按 `appId:userOpenId` 隔离）
 - 用户只能访问自己在飞书中有权限的资源
+- 所有 OAuth 授权用户都可以使用斜杠命令（`/help`、`/new`、`/status` 等），绕过 OpenClaw 内置的 access group 限制（默认仅 Owner），见上游 issue [#132](https://github.com/larksuite/openclaw-lark/issues/132)
 - 改回 `true`（或删除该字段）即可恢复 Owner-Only 模式
 
 ### 动态 Agent 创建

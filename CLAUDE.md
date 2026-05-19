@@ -131,8 +131,10 @@ export function registerMyTool(api: OpenClawPluginApi): boolean {
 ### 我们在上游基础上的改动
 
 #### 1. 多用户 OAuth 支持（`uat.ownerOnly` 配置开关）
-- **文件**: `config-schema.ts`, `owner-policy.ts`, `tool-client.ts`, `oauth.ts`, `auth.ts`, `onboarding-auth.ts`, `auto-auth.ts`
-- **改动**: 新增 `uat.ownerOnly`（默认 true）配置项。设为 false 时任何用户都可以各自 OAuth 授权，token 按 `appId:userOpenId` 独立存储。
+- **文件**: `config-schema.ts`, `owner-policy.ts`, `tool-client.ts`, `oauth.ts`, `auth.ts`, `onboarding-auth.ts`, `auto-auth.ts`, `messaging/inbound/handler.ts`
+- **改动**: 新增 `uat.ownerOnly`（默认 true）配置项。设为 false 时：
+  - 任何用户都可以各自 OAuth 授权，token 按 `appId:userOpenId` 独立存储
+  - `accountScopedCfg` 注入 `commands: { useAccessGroups: false }`，禁用 SDK 内置 access-group 命令鉴权（对应上游 issue [#132](https://github.com/larksuite/openclaw-lark/issues/132)），让飞书插件的 `allowFrom`（含 OAuth 用户）独享斜杠命令授权
 - **关键函数**: `isOwnerOnlyEnabled()`, `assertOwnerAccessIfRequired()`（在 `owner-policy.ts`）
 
 #### 2. 动态 Agent 写入 agent-context.json
